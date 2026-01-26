@@ -380,14 +380,22 @@ class WhiteLabel:
 	# ----------------------------------------------------------------------
 	@classmethod
 	def imp(cls, file_path):
-		name   = os.path.splitext(os.path.basename(file_path))[0]
-		module = load_module(name, file_path)
+		module_name = os.path.splitext(os.path.basename(file_path))[0]
+		module      = load_module(module_name, file_path)
 
 		for obj in module.__dict__.values():
-			if isinstance(obj, type):
-				if any(base.__name__ == 'WhiteLabel' for base in obj.__mro__):
-					instance = obj()
-					sys.modules[instance.lib_name] = instance
-					return instance
+			if (
+				isinstance(obj, type)
+				and issubclass(obj, WhiteLabel)
+				and obj is not WhiteLabel
+			):
+				# КРИТИЧНО: lib_path — папка, где лежит файл
+				lib_path = os.path.dirname(os.path.abspath(file_path))
+
+				instance = obj(lib_path=lib_path)
+
+				# Регистрируем как модуль
+				sys.modules[instance.lib_name] = instance
+				return instance
 
 		raise RuntimeError(f'No WhiteLabel subclass in `{file_path}`')
