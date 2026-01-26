@@ -1,3 +1,4 @@
+print('test')
 # ======================================================================
 #  WhiteLabel — lazy runtime module loader
 # ======================================================================
@@ -220,25 +221,28 @@ class Namespace:
 # ======================================================================
 
 class WhiteLabel:
-	Module    = Module
-	Namespace = Namespace
+	Module     = Module
+	Namespace  = Namespace
 
-	verbose   = True
+	verbose    = True
 
-	_instance = None
-	_lock     = threading.Lock()
+	_instances = {}
+	_lock      = threading.Lock()
 
-	def __new__(cls, lib_file=None):
-		if cls._instance is None:
-			with cls._lock:
-				if cls._instance is None:
-					cls._instance = super().__new__(cls)
-					cls._instance.initialize(lib_file)
-		return cls._instance
+	def __new__(cls, lib_path=None):
+		with cls._lock:
+			if cls not in cls._instances:
+				inst = super().__new__(cls)
+				inst.initialize(lib_path)
+				cls._instances[cls] = inst
+		return cls._instances[cls]
 
 	# Resolve top-level attribute access.
 	# ----------------------------------------------------------------------
 	def __getattr__(self, name):
+		cls = type(self)
+		if hasattr(cls, name):
+			return getattr(cls, name)
 		return self._resolve(name, self.core_path)
 
 	# ======================================================================
@@ -359,11 +363,9 @@ class WhiteLabel:
 
 	# Initialize core paths and internal caches.
 	# ----------------------------------------------------------------------
-	def initialize(self, lib_file=None):
-		self.lib_name = self.__class__.__name__.lower()
-		self.lib_file = __file__ if lib_file is None else lib_file
-		self.lib_path = os.path.dirname(os.path.abspath(self.lib_file))
-
+	def initialize(self, lib_path=None):
+		self.lib_name    = self.__class__.__name__.lower()
+		self.lib_path    = os.path.dirname(os.path.abspath(__file__)) if lib_path is None else lib_path
 		self.core_path   = os.path.join(self.lib_path, 'core')
 		self.module_attr = f'__{self.lib_name}_module__'
 
@@ -373,3 +375,19 @@ class WhiteLabel:
 		self._ns_cache    = {}
 		self._data_cache  = {}
 		self._pkg_cache   = {}
+
+	# Allowes to remotely import concrete wl library
+	# ----------------------------------------------------------------------
+	@classmethod
+	def imp(cls, file_path):
+		name   = os.path.splitext(os.path.basename(file_path))[0]
+		module = load_module(name, file_path)
+
+		for obj in module.__dict__.values():
+			if isinstance(obj, type):
+				if any(base.__name__ == 'WhiteLabel' for base in obj.__mro__):
+					instance = obj()
+					sys.modules[instance.lib_name] = instance
+					return instance
+
+		raise RuntimeError(f'No WhiteLabel subclass in `{file_path}`')
