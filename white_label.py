@@ -139,6 +139,7 @@ print('test')
 import os
 import sys
 import importlib.util
+import inspect
 import re
 import threading
 
@@ -149,11 +150,22 @@ import yaml
 # Common methods
 # ======================================================================
 
+# Get class module file
+# ----------------------------------------------------------------------
+def get_class_file(cls):
+	module = sys.modules.get(cls.__module__)
+	if module and hasattr(module, '__file__'):
+		return module.__file__
+	return None
+
 # Load module
 # ----------------------------------------------------------------------
-def load_module(import_path, file_path):
-	spec   = importlib.util.spec_from_file_location(import_path, file_path)
+def load_module(name, path):
+	spec   = importlib.util.spec_from_file_location(name, path)
 	module = importlib.util.module_from_spec(spec)
+	module.__file__ = path
+	if name not in sys.modules:
+		sys.modules[name] = module
 	spec.loader.exec_module(module)
 	return module
 
@@ -256,7 +268,9 @@ class WhiteLabel:
 		result = None
 
 		if os.path.isdir(path):
-			if path not in self._ns_cache:
+			if path in self._ns_cache:
+				result = self._ns_cache[path]
+			else:
 				result = Namespace(path)
 				setattr(result, '__lib__', self)
 				self._ns_cache[path] = result
@@ -271,7 +285,7 @@ class WhiteLabel:
 					result = self._load_data(file_path)
 
 		if result is None:
-			raise AttributeError(f'Module `{self._get_module_name(path)}` does not exist')
+			raise AttributeError(f'Module `{path}` does not exist')
 
 		return result
 
@@ -304,7 +318,7 @@ class WhiteLabel:
 	# ----------------------------------------------------------------------
 	def _is_module_class(self, obj):
 		return (
-			isinstance(obj, type)      and
+			isinstance(obj, type)   and
 			issubclass(obj, Module) and
 			obj is not Module
 		)
@@ -364,8 +378,9 @@ class WhiteLabel:
 	# Initialize core paths and internal caches.
 	# ----------------------------------------------------------------------
 	def initialize(self, lib_path=None):
+		self.file_name   = get_class_file(self.__class__)
 		self.lib_name    = self.__class__.__name__.lower()
-		self.lib_path    = os.path.dirname(os.path.abspath(__file__)) if lib_path is None else lib_path
+		self.lib_path    = os.path.dirname(os.path.abspath(self.file_name)) if lib_path is None else lib_path
 		self.core_path   = os.path.join(self.lib_path, 'core')
 		self.module_attr = f'__{self.lib_name}_module__'
 
@@ -376,26 +391,17 @@ class WhiteLabel:
 		self._data_cache  = {}
 		self._pkg_cache   = {}
 
+		print(f'Initialized lib `{self.lib_name}`. Files at {self.lib_path}.')
+
 	# Allowes to remotely import concrete wl library
 	# ----------------------------------------------------------------------
 	@classmethod
 	def imp(cls, file_path):
-		module_name = os.path.splitext(os.path.basename(file_path))[0]
-		module      = load_module(module_name, file_path)
+		lib_name = os.path.splitext(os.path.basename(file_path))[0]
+		module   = load_module(lib_name, file_path)
 
 		for obj in module.__dict__.values():
-			if (
-				isinstance(obj, type)
-				and issubclass(obj, WhiteLabel)
-				and obj is not WhiteLabel
-			):
-				# КРИТИЧНО: lib_path — папка, где лежит файл
-				lib_path = os.path.dirname(os.path.abspath(file_path))
+			if isinstance(obj, type) and issubclass(obj, WhiteLabel):
+				return obj
 
-				instance = obj(lib_path=lib_path)
-
-				# Регистрируем как модуль
-				sys.modules[instance.lib_name] = instance
-				return instance
-
-		raise RuntimeError(f'No WhiteLabel subclass in `{file_path}`')
+		raise RuntimeError(f'No WhiteLabel instance produced by `{file_path}`')
