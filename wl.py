@@ -199,7 +199,6 @@ class WL:
 	Module     = Module
 	Namespace  = Namespace
 	Service    = Service
-	Conf       = Conf
 
 	verbose    = True
 
@@ -351,6 +350,14 @@ class WL:
 
 		return self._data_cache.get(path)
 
+	# Late-bind object to lib
+	# ----------------------------------------------------------------------
+	def _attach(self, name, obj):
+		setattr(obj, '__lib__', self)                              # Set __lib__ attr on Module
+		setattr(obj, self.lib_name, self)                          # Set <lib> attr on Module
+		setattr(obj, self.module_attr, f'{self.lib_name}.{name}')  # Set __mylib_module__
+		setattr(self, name, obj)
+
 	# ======================================================================
 	# PUBLIC METHODS
 	# ======================================================================
@@ -372,10 +379,8 @@ class WL:
 		self._data_cache  = {}
 		self._pkg_cache   = {}
 
-		self.Events = Events()
-		setattr(self.Events, '__lib__', self)                              # Set __lib__ attr on Module
-		setattr(self.Events, self.lib_name, self)                          # Set <lib> attr on Module
-		setattr(self.Events, self.module_attr, f'{self.lib_name}.Events')  # Set __mylib_module__
+		self._attach('Events', Events())
+		self._attach('Conf',   Conf())
 
 		print(f'Initialized lib `{self.lib_name}` to handle files at `{self.lib_path}`.')
 

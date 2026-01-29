@@ -7,6 +7,13 @@ from .service import Service
 
 class Conf(Service):
 
+	def __init__(self):
+		try:
+			from dotenv import dotenv_values
+			object.__setattr__(self, '_data', dict(dotenv_values()))
+		except ImportError:
+			object.__setattr__(self, '_data', {})
+
 	def __getitem__(self, name):
 		data = object.__getattribute__(self, '__dict__').get('_data')
 		if data is None:
@@ -50,13 +57,6 @@ class Conf(Service):
 	# ==================================================================
 	# PUBLIC METHODS
 	# ==================================================================
-
-	def initialize(self):
-		try:
-			from dotenv import dotenv_values
-			object.__setattr__(self, '_data', dict(dotenv_values()))
-		except ImportError:
-			object.__setattr__(self, '_data', {})
 
 	def to_dict(self):
 		return dict(self._data)
