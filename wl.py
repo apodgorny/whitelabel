@@ -1,4 +1,3 @@
-print('test')
 # ======================================================================
 #  WhiteLabel — lazy runtime module loader
 # ======================================================================
@@ -139,16 +138,23 @@ print('test')
 import os
 import sys
 import importlib.util
-import inspect
 import re
 import threading
 
 import json
 import yaml
 
+from .core.module    import Module
+from .core.namespace import Namespace
+from .core.service   import Service
+from .core.conf      import Conf
+from .core.events    import Events
+
 # ======================================================================
 # Common methods
 # ======================================================================
+
+_MODULE_CACHE = {}
 
 # Get class module file
 # ----------------------------------------------------------------------
@@ -161,13 +167,18 @@ def get_class_file(cls):
 # Load module
 # ----------------------------------------------------------------------
 def load_module(name, path):
-	spec   = importlib.util.spec_from_file_location(name, path)
-	module = importlib.util.module_from_spec(spec)
-	module.__file__ = path
-	if name not in sys.modules:
-		sys.modules[name] = module
-	spec.loader.exec_module(module)
-	return module
+	abspath = os.path.abspath(path)
+
+	if abspath not in _MODULE_CACHE:
+		spec   = importlib.util.spec_from_file_location(name, path)
+		module = importlib.util.module_from_spec(spec)
+		module.__file__ = path
+		if name not in sys.modules:
+			sys.modules[name] = module
+		spec.loader.exec_module(module)
+		_MODULE_CACHE[abspath] = module
+
+	return _MODULE_CACHE[abspath]
 
 # Convert CamelCase name to snake_case filename.
 # ----------------------------------------------------------------------
@@ -181,77 +192,39 @@ def snake_to_camel(name):
 
 
 # ======================================================================
-# CLASS Module
-# ======================================================================
-
-class Module:
-
-	def print(self, *args, **kwargs):
-		gray  = '\033[38;5;242m'
-		reset = '\033[0m'
-		if not WhiteLabel.verbose:
-			module_attr = getattr(self, self.__lib__.module_attr)
-			print(f'{gray}{module_attr}:{reset}', *args, **kwargs)
-
-# ======================================================================
-# CLASS Namespace
-# ======================================================================
-
-class Namespace:
-
-	def __init__(self, path=None):
-		self.path = path
-
-	# Resolve attribute access through resolver.
-	# ----------------------------------------------------------------------
-	def __getattr__(self, name):
-		module = self._load_init()
-		if module is not None and hasattr(module, name):
-			return getattr(module, name)
-
-		return self.__lib__._resolve(name, self.path)
-
-	# Load package __init__.py if present.
-	# ----------------------------------------------------------------------
-	def _load_init(self):
-		module    = None
-		init_path = os.path.join(self.path, '__init__.py')
-
-		if os.path.isfile(init_path):
-			cache = self.__lib__._pkg_cache
-			if init_path not in cache:
-				module_hash      = abs(hash(init_path))
-				module           = load_module(f'{self.__lib__.lib_name}.{module_hash}', init_path)
-				cache[init_path] = module
-			else:
-				module = cache[init_path]
-
-		return module
-
-# ======================================================================
 # CLASS WhiteLabel
 # ======================================================================
 
-class WhiteLabel:
+class WL:
 	Module     = Module
 	Namespace  = Namespace
+	Service    = Service
+	Conf       = Conf
 
 	verbose    = True
 
 	_instances = {}
 	_lock      = threading.Lock()
 
+	# Entry point
+	# ----------------------------------------------------------------------
 	def __new__(cls, lib_path=None):
 		with cls._lock:
 			if cls not in cls._instances:
-				inst = super().__new__(cls)
-				inst.initialize(lib_path)
+				inst     = super().__new__(cls)
+				lib_name = cls.__name__.lower()
+
+				inst.initialize(lib_name, lib_path)
 				cls._instances[cls] = inst
+
 		return cls._instances[cls]
 
 	# Resolve top-level attribute access.
 	# ----------------------------------------------------------------------
 	def __getattr__(self, name):
+		if name.startswith('__'):
+			raise AttributeError(name)
+
 		cls = type(self)
 		if hasattr(cls, name):
 			return getattr(cls, name)
@@ -267,6 +240,8 @@ class WhiteLabel:
 		path   = os.path.join(path, camel_to_snake(name))
 		result = None
 
+		# Namespace
+		# - - - - - - - - - - - - - - - - - - - - - - - - - 
 		if os.path.isdir(path):
 			if path in self._ns_cache:
 				result = self._ns_cache[path]
@@ -275,15 +250,21 @@ class WhiteLabel:
 				setattr(result, '__lib__', self)
 				self._ns_cache[path] = result
 
+		# Python Class
+		# - - - - - - - - - - - - - - - - - - - - - - - - - 
 		elif os.path.isfile(f'{path}.py'):
-			result = self._load_py_module(f'{path}.py')
+			result = self._load_class(f'{path}.py')
 
+		# Data files
+		# - - - - - - - - - - - - - - - - - - - - - - - - - 
 		else:
 			for ext in ('yml', 'yaml', 'json'):
 				file_path = f'{path}.{ext}'
 				if os.path.isfile(file_path):
 					result = self._load_data(file_path)
 
+		# None of the above
+		# - - - - - - - - - - - - - - - - - - - - - - - - - 
 		if result is None:
 			raise AttributeError(f'Module `{path}` does not exist')
 
@@ -291,22 +272,16 @@ class WhiteLabel:
 
 	# Build public lib module path.
 	# ----------------------------------------------------------------------
-	def _get_module_name(self, path):
-		rel_path   = os.path.relpath(path, self.core_path)
+	def _get_module_name(self, abs_path):
+		rel_path   = os.path.relpath(abs_path, self.core_path)
 		parts      = rel_path.split(os.sep)
 		name       = parts.pop()
-		class_name = snake_to_camel(name)
+		class_name = snake_to_camel(name[:-3])  # .py
 
 		parts.insert(0, self.lib_name)
 		parts.append(class_name)
 
 		return '.'.join(parts)
-
-	# Build importlib module path.
-	# ----------------------------------------------------------------------
-	def _get_import_path(self, path):
-		rel_path = os.path.relpath(path, self.core_path)
-		return f'{self.lib_name}.core.{rel_path[:-3].replace(os.sep, ".")}'
 
 	# Get expected class name from file path.
 	# ----------------------------------------------------------------------
@@ -323,35 +298,40 @@ class WhiteLabel:
 			obj is not Module
 		)
 
-	# Load module file and extract Module subclass
+	# Check whether object matches lib module class contract.
 	# ----------------------------------------------------------------------
-	def _get_class(self, path):
-		import_path = self._get_import_path(path)
-		module      = load_module(import_path, path)
-		class_name  = self._get_class_name(path)
-		
-		cls = getattr(module, class_name, None)
-		if self._is_module_class(cls):
-			return cls
-
-		return None
+	def _is_service_class(self, obj):
+		return (
+			self._is_module_class(obj) and
+			issubclass(obj, Service)   and
+			obj is not Service
+		)
 
 	# Load module file and extract Module subclass
 	# ----------------------------------------------------------------------
-	def _load_py_module(self, path):
-		if path not in self._class_cache:
-			cls = self._get_class(path)
+	def _load_class(self, abs_path):
+		if abs_path not in self._class_cache:
+			name        = self._get_module_name(abs_path)
+			module      = load_module(name, abs_path)
+			class_name  = self._get_class_name(abs_path)
+			
+			cls = getattr(module, class_name, None)
 
 			if cls is None:
-				raise AttributeError(f'File `{path}` defines no {self.lib_name}.Module')
+				raise AttributeError(f'File `{abs_path}` defines no {class_name} class')
+			if not self._is_module_class(cls):
+				raise AttributeError(f'File `{abs_path}` defines no {self.lib_name}.Module')
 
-			self._class_cache[path] = cls
+			setattr(cls, '__lib__', self)                                    # Set __lib__ attr on Module
+			setattr(cls, self.lib_name, self)                                # Set <lib> attr on Module
+			setattr(cls, self.module_attr, self._get_module_name(abs_path))  # Set __mylib_module__
 
-			setattr(cls, '__lib__', self)                                # Set __lib__ attr on Module
-			setattr(cls, self.lib_name, self)                            # Set <lib> attr on Module
-			setattr(cls, self.module_attr, self._get_module_name(path))  # Set __mylib_module__
+			if self._is_service_class(cls):
+				cls = cls()
 
-		return self._class_cache[path]
+			self._class_cache[abs_path] = cls
+
+		return self._class_cache[abs_path]
 
 	# Load data file.
 	# ----------------------------------------------------------------------
@@ -377,11 +357,12 @@ class WhiteLabel:
 
 	# Initialize core paths and internal caches.
 	# ----------------------------------------------------------------------
-	def initialize(self, lib_path=None):
-		self.file_name   = get_class_file(self.__class__)
-		self.lib_name    = self.__class__.__name__.lower()
-		self.lib_path    = os.path.dirname(os.path.abspath(self.file_name)) if lib_path is None else lib_path
-		self.core_path   = os.path.join(self.lib_path, 'core')
+	def initialize(self, lib_name, lib_path=None):
+		self.lib_name     = lib_name
+		self.file_name    = get_class_file(self.__class__)
+		self.lib_path     = os.path.dirname(os.path.abspath(self.file_name)) if lib_path is None else lib_path
+		self.core_path    = os.path.join(self.lib_path, 'core')
+		self.wl_core_path = os.path.join(os.path.dirname(__file__), 'core')
 		self.module_attr = f'__{self.lib_name}_module__'
 
 		sys.modules[self.lib_name] = self
@@ -391,7 +372,12 @@ class WhiteLabel:
 		self._data_cache  = {}
 		self._pkg_cache   = {}
 
-		print(f'Initialized lib `{self.lib_name}`. Files at {self.lib_path}.')
+		self.Events = Events()
+		setattr(self.Events, '__lib__', self)                              # Set __lib__ attr on Module
+		setattr(self.Events, self.lib_name, self)                          # Set <lib> attr on Module
+		setattr(self.Events, self.module_attr, f'{self.lib_name}.Events')  # Set __mylib_module__
+
+		print(f'Initialized lib `{self.lib_name}` to handle files at `{self.lib_path}`.')
 
 	# Allowes to remotely import concrete wl library
 	# ----------------------------------------------------------------------
