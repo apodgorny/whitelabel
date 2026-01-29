@@ -64,8 +64,8 @@ class Function:
 	def __hash__(self):
 		return hash((
 			id(self.owner) if self.owner is not None else None,
-			self.func.__module__,
-			self.func.__qualname__,
+			getattr(self.func, '__module__', None),
+			self._func_id(),
 		))
 
 	# Equality by exact owner and function identity
@@ -89,6 +89,13 @@ class Function:
 			else 'static'
 		)
 		return f'<Function {owner} {self.func.__module__}.{self.func.__qualname__}>'
+
+	def _func_id(self):
+		f = self.func
+		if hasattr(f, '__qualname__') : return f.__qualname__
+		if hasattr(f, '__name__')     : return f.__name__
+		# fallback: type-based identity
+		return f.__class__.__qualname__
 
 	# ======================================================================
 	# PUBLIC METHODS
