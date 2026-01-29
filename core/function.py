@@ -90,6 +90,12 @@ class Function:
 		)
 		return f'<Function {owner} {self.func.__module__}.{self.func.__qualname__}>'
 
+	# ======================================================================
+	# PRIVATE METHODS
+	# ======================================================================
+
+	# Function identity is: (owner identity) × (callable semantic name)
+	# ----------------------------------------------------------------------
 	def _func_id(self):
 		f = self.func
 		if hasattr(f, '__qualname__') : return f.__qualname__
