@@ -149,6 +149,7 @@ from .core.namespace import Namespace
 from .core.service   import Service
 from .core.conf      import Conf
 from .core.events    import Events
+from .core.string    import String
 
 # ======================================================================
 # Common methods
@@ -179,17 +180,6 @@ def load_module(name, path):
 		_MODULE_CACHE[abspath] = module
 
 	return _MODULE_CACHE[abspath]
-
-# Convert CamelCase name to snake_case filename.
-# ----------------------------------------------------------------------
-def camel_to_snake(name):
-	return re.sub(r'(?<!^)(?=[A-Z])', '_', name).lower()
-
-# Convert snake_case name to CamelCase.
-# ----------------------------------------------------------------------
-def snake_to_camel(name):
-	return ''.join(part.capitalize() for part in name.split('_'))
-
 
 # ======================================================================
 # CLASS WhiteLabel
@@ -236,7 +226,7 @@ class WL:
 	# Resolve module or namespace by name.
 	# ----------------------------------------------------------------------
 	def _resolve(self, name, path):
-		path   = os.path.join(path, camel_to_snake(name))
+		path   = os.path.join(path, String.camel_to_snake(name))
 		result = None
 
 		# Namespace
@@ -275,7 +265,7 @@ class WL:
 		rel_path   = os.path.relpath(abs_path, self.core_path)
 		parts      = rel_path.split(os.sep)
 		name       = parts.pop()
-		class_name = snake_to_camel(name[:-3])  # .py
+		class_name = String.snake_to_camel(name[:-3])  # .py
 
 		parts.insert(0, self.lib_name)
 		parts.append(class_name)
@@ -286,7 +276,7 @@ class WL:
 	# ----------------------------------------------------------------------
 	def _get_class_name(self, path):
 		name = os.path.splitext(os.path.basename(path))[0]
-		return snake_to_camel(name)
+		return String.snake_to_camel(name)
 
 	# Check whether object matches lib module class contract.
 	# ----------------------------------------------------------------------
@@ -381,6 +371,7 @@ class WL:
 
 		self._attach('Events', Events())
 		self._attach('Conf',   Conf())
+		self._attach('String', String())
 
 		print(f'Initialized lib `{self.lib_name}` to handle files at `{self.lib_path}`.')
 
@@ -396,3 +387,14 @@ class WL:
 				return obj
 
 		raise RuntimeError(f'No WhiteLabel instance produced by `{file_path}`')
+
+	@classmethod
+	def define(cls, lib_name, lib_file, **attrs):
+		attrs['__file__'] = lib_file
+		
+		bases    = (cls,)
+		lib_cls  = type(lib_name, bases, attrs)
+		lib_inst = lib_cls(lib_path=os.path.dirname(lib_file))
+		
+		return lib_inst
+
