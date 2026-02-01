@@ -375,6 +375,20 @@ class WL:
 
 		print(f'Initialized lib `{self.lib_name}` to handle files at `{self.lib_path}`.')
 
+	# Resolve dotted path using WL lazy resolution
+	# ----------------------------------------------------------------------
+	def resolve(self, module_name: str):
+		obj = self
+		
+		parts = module_name.split('.')
+		if parts[0] == self.lib_name:
+			parts.pop(0)
+
+		for part in parts:
+			obj = getattr(obj, part)
+
+		return obj
+
 	# Allowes to remotely import concrete wl library
 	# ----------------------------------------------------------------------
 	@classmethod
