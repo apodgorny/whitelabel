@@ -133,6 +133,45 @@
 #	- Filesystem *is* the API
 #	- One reusable core for many libraries
 #
+# 	Example usage:
+# 	-----------------------------
+# 	1. Create file `{self.core_path}/mymodules/my_module.py`
+3
+# 		import {self.lib_name}
+#
+# 		class MyModule({self.lib_name}.Module):
+# 			def __init__(self, name):
+# 				self.name = name
+3
+# 			def hello(self):
+# 				print('Hello from', self.name, 'at', self.{self.module_attr})
+# 				print('File names must be a snake case version of class name')
+# 				print('Only one class is permitted per file')
+#
+# 	2. Create file `{self.core_path}/mymodules/my_service.py`
+#
+# 		import {self.lib_name}
+#
+# 		class MyService({self.lib_name}.Service):
+# 			def initialize(self):
+# 				# One time initialization goes here
+# 				pass
+#
+# 			def hello(self):
+# 				print('Services stay in memory and accessed without ()')
+#
+# 	3. Create file  `{self.lib_path}/main.py`
+#
+# 		import o
+#
+# 		instance = o.MyModule()
+# 		instance.hello()
+#
+# 		o.MyService.hello()
+#
+# 	4. From `{self.lib_path}` run: `python main.py`
+#
+#
 # ======================================================================
 
 import os
@@ -150,6 +189,7 @@ from .core.service   import Service
 from .core.conf      import Conf
 from .core.events    import Events
 from .core.string    import String
+from .core.dual      import DualMethod, DualProperty
 
 # ======================================================================
 # Common methods
@@ -239,23 +279,34 @@ class WL:
 				setattr(result, '__lib__', self)
 				self._ns_cache[path] = result
 
-		# Python Class
-		# - - - - - - - - - - - - - - - - - - - - - - - - - 
-		elif os.path.isfile(f'{path}.py'):
-			result = self._load_class(f'{path}.py')
-
-		# Data files
-		# - - - - - - - - - - - - - - - - - - - - - - - - - 
 		else:
-			for ext in ('yml', 'yaml', 'json'):
-				file_path = f'{path}.{ext}'
-				if os.path.isfile(file_path):
-					result = self._load_data(file_path)
+			
+			# Custom plugins
+			# - - - - - - - - - - - - - - - - - - - - - - - - - 
+			for plugin_name, plugin in self._plugins.items():
+				try:
+					if plugin.match(path):
+						return plugin.load(path, self)  # Early return for plugins only
+				except Exception as e:
+					print(f'Plugin `{plugin_name}` raised: `{type(e).__name__}`: `{str(e)}`')
+
+			# Python Class
+			# - - - - - - - - - - - - - - - - - - - - - - - - - 
+			if os.path.isfile(f'{path}.py'):
+				result = self._load_class(f'{path}.py')
+
+			# Data files
+			# - - - - - - - - - - - - - - - - - - - - - - - - - 
+			else:
+				for ext in ('yml', 'yaml', 'json'):
+					file_path = f'{path}.{ext}'
+					if os.path.isfile(file_path):
+						result = self._load_data(file_path)
 
 		# None of the above
 		# - - - - - - - - - - - - - - - - - - - - - - - - - 
 		if result is None:
-			raise AttributeError(f'Module `{path}` does not exist')
+			raise AttributeError(f'Module `{path}` does not exist or no loading method is provided')
 
 		return result
 
@@ -368,12 +419,21 @@ class WL:
 		self._ns_cache    = {}
 		self._data_cache  = {}
 		self._pkg_cache   = {}
+		self._plugins     = {}
 
-		self._attach('Events', Events())
-		self._attach('Conf',   Conf())
-		self._attach('String', String())
+		self._attach('Events',        Events())
+		self._attach('Conf',          Conf())
+		self._attach('String',        String())
+		self._attach('dual_method',   DualMethod)
+		self._attach('dual_property', DualProperty)
 
-		print(f'Initialized lib `{self.lib_name}` to handle files at `{self.lib_path}`.')
+		if self.verbose:
+			print(f'\nInitialized library `{self.lib_name}`')
+			print('-' * 70)
+			print(f'– ' + f'Main `{self.lib_name}` directory'.ljust(27, ' ') + f' : `{self.lib_path}`')
+			print(f'– Import files expected under : `{self.core_path}`')
+			print(f'– All modules have property   : `self.{self.module_attr}`')
+			print()
 
 	# Resolve dotted path using WL lazy resolution
 	# ----------------------------------------------------------------------
@@ -402,6 +462,8 @@ class WL:
 
 		raise RuntimeError(f'No WhiteLabel instance produced by `{file_path}`')
 
+	# The main method you will use to create your library
+	# ----------------------------------------------------------------------
 	@classmethod
 	def define(cls, lib_name, lib_file, **attrs):
 		attrs['__file__'] = lib_file
@@ -411,4 +473,12 @@ class WL:
 		lib_inst = lib_cls(lib_path=os.path.dirname(lib_file))
 		
 		return lib_inst
+
+	# Adds plugin for custom path matching and matched file processing
+	# ----------------------------------------------------------------------
+	def add_plugin(self, plugin_class):
+		name = plugin_class.__name__
+		if name in self._plugins:
+			raise ValueError(f'Plugin `{name}` already registered')
+		self._plugins[name] = plugin_class()
 
