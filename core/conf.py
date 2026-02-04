@@ -58,5 +58,10 @@ class Conf(Service):
 	# PUBLIC METHODS
 	# ==================================================================
 
+	def get(self, v, default=None):
+		if v in self:
+			return self[v]
+		return default
+
 	def to_dict(self):
 		return dict(self._data)

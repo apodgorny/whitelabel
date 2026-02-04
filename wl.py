@@ -230,6 +230,7 @@ class WL:
 	Namespace  = Namespace
 	Service    = Service
 
+	undefined  = '__undefined__'
 	verbose    = True
 
 	_instances = {}
@@ -394,9 +395,11 @@ class WL:
 	# Late-bind object to lib
 	# ----------------------------------------------------------------------
 	def _attach(self, name, obj):
-		setattr(obj, '__lib__', self)                              # Set __lib__ attr on Module
-		setattr(obj, self.lib_name, self)                          # Set <lib> attr on Module
-		setattr(obj, self.module_attr, f'{self.lib_name}.{name}')  # Set __mylib_module__
+		cls = obj if isinstance(obj, type) else obj.__class__
+
+		setattr(cls, '__lib__', self)                              # Set __lib__ attr on Module
+		setattr(cls, self.lib_name, self)                          # Set <lib> attr on Module
+		setattr(cls, self.module_attr, f'{self.lib_name}.{name}')  # Set __mylib_module__
 		setattr(self, name, obj)
 
 	# ======================================================================
