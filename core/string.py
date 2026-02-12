@@ -82,7 +82,6 @@ class String(Module):
 	# ----------------------------------------------------------------------
 	@staticmethod
 	def to_snake_case(name: str) -> str:
-		import re
 		name = re.sub(r'(?<!^)(?=[A-Z])', '_', name).lower()
 		return name.replace('-', '_')
 
@@ -98,9 +97,17 @@ class String(Module):
 	# Converts CamelCase to snake_case (preserving acronyms).
 	# ----------------------------------------------------------------------
 	@staticmethod
-	def camel_to_snake(name: str) -> str:
+	def camel_to_snake(name: str, allow_consequent_caps=False) -> str:
 		import re
-		return re.sub(r'(?<!^)(?=[A-Z])', '_', name).lower()
+
+		if allow_consequent_caps:
+			# VectorDB -> vector_db, MyXMLParser -> my_xml_parser
+			name = re.sub(r'([a-z0-9])([A-Z]+)', r'\1_\2', name)
+		else:
+			# VectorDB -> vector_d_b, MyXMLParser -> my_x_m_l_parser
+			name = re.sub(r'(?<!^)(?=[A-Z])', '_', name)
+
+		return name.lower()
 
 	# Replaces multiple spaces/newlines with a single space.
 	# ----------------------------------------------------------------------

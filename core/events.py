@@ -3,13 +3,14 @@
 from collections import defaultdict
 
 from .function import Function
+from .service  import Service
 
 
-class Events:
+class Events(Service):
 
 	# Initialize event registry (trigger -> list of callbacks)
 	# ----------------------------------------------------------------------
-	def __init__(self):
+	def initialize(self):
 		self.triggers = defaultdict(list)
 
 	# Attach callback to trigger

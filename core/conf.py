@@ -2,12 +2,16 @@
 # CLASS Conf
 # ======================================================================
 
+import os
+
 from .service import Service
+import sys
 
 
 class Conf(Service):
 
-	def __init__(self):
+	def initialize(self):
+		# super().__init__()
 		try:
 			from dotenv import dotenv_values
 			object.__setattr__(self, '_data', dict(dotenv_values()))
@@ -18,10 +22,17 @@ class Conf(Service):
 		data = object.__getattribute__(self, '__dict__').get('_data')
 		if data is None:
 			raise AttributeError(name)
-		try:
+
+		# 1. .env values
+		if name in data:
 			return data[name]
-		except KeyError:
-			raise AttributeError(name)
+
+		# 2. exported environment variables
+		if name in os.environ:
+			return os.environ[name]
+
+		# 3. not found
+		raise AttributeError(f'{self.__wl_module__}.{name} is not defined')
 
 	def __setitem__(self, name, value):
 		data = object.__getattribute__(self, '__dict__').get('_data')
