@@ -8,9 +8,10 @@ import json
 import yaml
 
 from .core.timer     import Timer
-from .core.module    import Module
+from .core.module    import Module, ModuleMeta
 from .core.directory import Directory
 from .core.file      import File
+from .core.registry  import Registry
 from .core.service   import Service
 from .core.conf      import Conf
 from .core.events    import Events
@@ -24,15 +25,39 @@ from .core.common    import Common
 # CLASS WhiteLabel
 # ======================================================================
 
+class Undefined:
+	_instance = None
+
+	def __new__(cls):
+		if cls._instance is None:
+			cls._instance = super().__new__(cls)
+		return cls._instance
+		
+	def __repr__(self)                  : return 'undefined'
+	def __str__(self)                   : return 'undefined'
+	def __bool__(self)                  : return False
+	def __getattr__(self, name)         : raise AttributeError(f'`undefined` object has no attribute `{name}`')
+	def __getitem__(self, key)          : raise TypeError(f'`undefined` object is not subscriptable')
+	def __call__(self, *args, **kwargs) : raise TypeError(f'`undefined` object is not callable')
+	def __setattr__(self, name, value)  : raise AttributeError(f'`undefined` object has no attribute `{name}`')
+	def __delattr__(self, name)         : raise AttributeError(f'`undefined` object has no attribute `{name}`')
+	def __setitem__(self, key, value)   : raise TypeError(f'`undefined` object does not support item assignment')
+	def __delitem__(self, key)          : raise TypeError(f'`undefined` object does not support item deletion')
+	def __len__(self)                   : raise TypeError(f'`undefined` object has no len()')
+	def __iter__(self)                  : raise TypeError(f'`undefined` object is not iterable')
+
+
 class WL:
 	Module     = Module
+	ModuleMeta = ModuleMeta
 	Directory  = Directory
 	File       = File
+	Registry   = Registry
 	String     = String
 	Service    = Service
 	Timer      = Timer
 
-	undefined  = '__undefined__'
+	undefined  = Undefined()
 	verbose    = True
 
 	_instances = {}  # cls : inst
@@ -61,11 +86,7 @@ class WL:
 		if hasattr(cls, name):
 			return getattr(cls, name)
 
-		result = self._resolve(name, self.core_path)
-		if result is None:
-			raise AttributeError(f'Module `{self.lib_name}.{name}` does not exist or no loading method is provided')
-
-		return result
+		return self._resolve(name, self.core_path)
 
 	# Resolve dotted path using WL lazy resolution
 	# ----------------------------------------------------------------------
@@ -80,6 +101,11 @@ class WL:
 			obj = getattr(obj, part)
 
 		return obj
+
+	# Iterate items in the library core directory.
+	# ----------------------------------------------------------------------
+	def __iter__(self):
+		return iter(Directory(self, self.core_path))
 
 	# Repr
 	# ----------------------------------------------------------------------
@@ -170,10 +196,8 @@ class WL:
 	def _attach(self, name, obj, instantiate=False):
 		Common.set_lib(obj, self)
 
-		if instantiate:
-			setattr(self, name, obj(self, None))
-		else:
-			setattr(self, name, obj)
+		if instantiate : setattr(self, name, obj(self, None))
+		else           : setattr(self, name, obj)
 
 	# ======================================================================
 	# PUBLIC METHODS
@@ -182,12 +206,13 @@ class WL:
 	# Initialize core paths and internal caches.
 	# ----------------------------------------------------------------------
 	def initialize(self, lib_name, lib_path=None, on_initialize=None):
-		self.lib_name     = lib_name
-		self.file_name    = Common.get_class_file(self.__class__)
-		self.lib_path     = os.path.dirname(os.path.abspath(self.file_name)) if lib_path is None else lib_path
-		self.core_path    = os.path.join(self.lib_path, 'core')
-		self.wl_core_path = os.path.join(os.path.dirname(__file__), 'core')
-		self.module_attr = f'__{self.lib_name}_module__'
+		self.Module.__lib__ = self
+		self.lib_name       = lib_name
+		self.file_name      = Common.get_class_file(self.__class__)
+		self.lib_path       = os.path.dirname(os.path.abspath(self.file_name)) if lib_path is None else lib_path
+		self.core_path      = os.path.join(self.lib_path, 'core')
+		self.wl_core_path   = os.path.join(os.path.dirname(__file__), 'core')
+		self.module_attr    = f'__{self.lib_name}_module__'
 
 		sys.modules[self.lib_name] = self
 		self.__path__ = [self.lib_path]
@@ -225,6 +250,24 @@ class WL:
 			raise ValueError(f'Plugin `{name}` already registered')
 		self._plugins[name] = plugin_class()
 
+	# Resolve filesystem path into a WL node under `core/`.
+	# ----------------------------------------------------------------------
+	@classmethod
+	def resolve(cls, path):
+		lib       = cls()
+		abs_path  = os.path.abspath(path)
+		core_path = os.path.abspath(lib.core_path)
+		result    = None
+
+		# Only real paths inside this library's `core/` tree resolve.
+		if os.path.commonpath([core_path, abs_path]) == core_path and os.path.exists(abs_path):
+			if os.path.isdir(abs_path):
+				result = Directory(lib, abs_path)
+			else:
+				result = File(lib, abs_path)
+
+		return result
+
 	# The main method you will use to create your library
 	# ----------------------------------------------------------------------
 	@classmethod
@@ -244,4 +287,3 @@ class WL:
 			on_initialize(**all_libs)
 		
 		return lib_inst
-

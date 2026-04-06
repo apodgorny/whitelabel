@@ -5,6 +5,7 @@ class FsNode:
 
 	def __init__(self, lib, path):
 		self.lib           = lib
+		self.__lib__       = lib
 		self.path          = os.path.abspath(path)
 		self.mod_path, ext = os.path.splitext(self.path)
 		self.name          = os.path.basename(self.mod_path)

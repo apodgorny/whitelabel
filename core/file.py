@@ -3,7 +3,7 @@ import os
 import json
 import yaml
 
-from .module    import Module
+from .module    import Module, ModuleMeta
 from .service   import Service
 from .common    import Common
 from .fs_node   import FsNode
@@ -40,9 +40,19 @@ class File(FsNode):
 	# ----------------------------------------------------------------------
 	def _is_module_class(self, obj):
 		return (
-			isinstance(obj, type)   and
-			issubclass(obj, Module) and
-			obj is not Module
+			isinstance(obj, type)
+			and
+			(
+				(
+					issubclass(obj, Module)
+					and obj is not Module
+				)
+				or
+				(
+					issubclass(obj, ModuleMeta)
+					and obj is not ModuleMeta
+				)
+			)
 		)
 
 	# Check whether object matches lib module class contract.
@@ -102,6 +112,18 @@ class File(FsNode):
 		with open(path, 'r') as f:
 			return f.read()
 
+	# Load with custom plugin
+	# ----------------------------------------------------------------------
+	def _load_with_plugin(self):
+		for plugin_name, plugin in self.lib._plugins.items():
+			try:
+				if plugin.match(self.path):
+					return plugin.load(self.path, self)
+			except Exception as e:
+				print(f'Plugin `{plugin_name}` raised: `{type(e).__name__}`: `{str(e)}`')
+
+		return None
+
 	# ======================================================================
 	# PUBLIC METHODS
 	# ======================================================================
@@ -111,13 +133,7 @@ class File(FsNode):
 
 		# Custom plugins
 		# - - - - - - - - - - - - - - - - - - - - - - - - - 
-		for plugin_name, plugin in self.lib._plugins.items():
-			try:
-				if plugin.match(self.path):
-					result = plugin.load(self.path, self)
-					break
-			except Exception as e:
-				print(f'Plugin `{plugin_name}` raised: `{type(e).__name__}`: `{str(e)}`')
+		result = self._load_with_plugin()
 
 		if result is None:
 
@@ -134,3 +150,9 @@ class File(FsNode):
 				result = loaders[self.ext](self.path)
 
 		return result
+
+	# Delete file.
+	# ----------------------------------------------------------------------
+	# def __del__(self):
+	# 	if self.exists:
+	# 		os.remove(self.path)

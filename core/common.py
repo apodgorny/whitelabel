@@ -11,10 +11,11 @@ class Common:
 		__module_attr__       = f'__{lib.lib_name}_module__'
 		__module_attr_value__ = module_name if module_name is not None else f'{lib.lib_name}.{obj.__class__.__name__}'
 
-		setattr( obj, '__lib__',         lib)                    # Set __lib__ attr on Module
-		setattr( obj, '__module_attr__', __module_attr__)        # Set name of module attr
-		setattr( obj,  __module_attr__,  __module_attr_value__)  # Set __mylib_module__
-		setattr( obj, '__wl_module__',   __module_attr_value__)  # Set __wl_module__, as shortcut inside lib
+		setattr( obj, '__lib__',            lib)                    # Set __lib__ attr on Module
+		setattr( obj, '__module_attr__',    __module_attr__)        # Set name of module attr
+		setattr( obj,  __module_attr__,     __module_attr_value__)  # Set __mylib_module__
+		setattr( obj, '__wl_module__',      __module_attr_value__)  # Set __wl_module__, as shortcut inside lib
+		setattr( obj, '__has_own_module__', module_name is not None)
 
 	# Get class module file
 	# ----------------------------------------------------------------------
@@ -34,9 +35,12 @@ class Common:
 		if abspath not in _MODULE_CACHE:
 			spec   = importlib.util.spec_from_file_location(name, path)
 			module = importlib.util.module_from_spec(spec)
+
 			module.__file__ = path    # Set __file__ to get later at get_class_file
+
 			if name not in sys.modules:
 				sys.modules[name] = module
+				
 			spec.loader.exec_module(module)
 			_MODULE_CACHE[abspath] = module
 
