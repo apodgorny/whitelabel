@@ -1,289 +1,139 @@
-import os
-import sys
-import importlib.util
-import re
-import threading
+import os, sys
 
-import json
-import yaml
-
-from .core.timer     import Timer
-from .core.module    import Module, ModuleMeta
-from .core.directory import Directory
-from .core.file      import File
-from .core.registry  import Registry
-from .core.service   import Service
-from .core.conf      import Conf
-from .core.events    import Events
-from .core.string    import String
-from .core.dual      import DualMethod, DualProperty
-
-from .core.common    import Common
+from lib.import_   import Import
+from lib.module    import Module, ModuleMeta
+from lib.service   import Service
+from lib.string    import String
+from lib.file      import File
+from lib.directory import Directory
+from lib.plugin    import Plugin
+from lib.undefined import Undefined
+from lib.timer     import Timer
 
 
-# ======================================================================
-# CLASS WhiteLabel
-# ======================================================================
 
-class Undefined:
-	_instance = None
+class WLMeta(type):
 
-	def __new__(cls):
-		if cls._instance is None:
-			cls._instance = super().__new__(cls)
-		return cls._instance
-		
-	def __repr__(self)                  : return 'undefined'
-	def __str__(self)                   : return 'undefined'
-	def __bool__(self)                  : return False
-	def __getattr__(self, name)         : raise AttributeError(f'`undefined` object has no attribute `{name}`')
-	def __getitem__(self, key)          : raise TypeError(f'`undefined` object is not subscriptable')
-	def __call__(self, *args, **kwargs) : raise TypeError(f'`undefined` object is not callable')
-	def __setattr__(self, name, value)  : raise AttributeError(f'`undefined` object has no attribute `{name}`')
-	def __delattr__(self, name)         : raise AttributeError(f'`undefined` object has no attribute `{name}`')
-	def __setitem__(self, key, value)   : raise TypeError(f'`undefined` object does not support item assignment')
-	def __delitem__(self, key)          : raise TypeError(f'`undefined` object does not support item deletion')
-	def __len__(self)                   : raise TypeError(f'`undefined` object has no len()')
-	def __iter__(self)                  : raise TypeError(f'`undefined` object is not iterable')
-
-
-class WL:
-	Module     = Module
-	ModuleMeta = ModuleMeta
-	Directory  = Directory
-	File       = File
-	Registry   = Registry
-	String     = String
-	Service    = Service
-	Timer      = Timer
-
-	undefined  = Undefined()
-	verbose    = True
-
-	_instances = {}  # cls : inst
-	_lock      = threading.Lock()
-
-	# Entry point
+	# Create class
 	# ----------------------------------------------------------------------
-	def __new__(cls, lib_path=None):
-		with cls._lock:
-			if cls not in cls._instances:
-				inst     = super().__new__(cls)
-				lib_name = cls.__name__.lower()
+	def __new__(mcls, name, bases, namespace, path=None, plugins=None):
+		module_name  = namespace.get('__module__')
+		module       = sys.modules[module_name]
+		lib_file     = os.path.realpath(module.__file__)
+		lib_path     = os.path.dirname(lib_file)
+		path         = path or os.path.join(lib_path, 'root')
+		plugins_path = os.path.join(lib_path, 'plugins')
 
-				inst.initialize(lib_name, lib_path)
-				cls._instances[cls] = inst
+		if not os.path.exists(path):
+			raise ValueError(f'Could not define class `{name}`. Path `{path}` does not exist')
 
-		return cls._instances[cls]
+		cls = super().__new__(mcls, name, bases, namespace)
 
-	# Resolve top-level attribute access.
+		Undefined.lib = cls
+
+		instance           = object.__new__(cls)
+		instance.__name__  = name.lower()
+		instance.__spec__  = None
+		instance.__children__ = {}
+		
+		# Publish library name for import
+		module.__dict__[instance.__name__] = instance
+		sys.modules[instance.__name__] = instance
+
+		cls.__path__     = path
+		cls.__lib_file__ = lib_file
+		cls.__lib_path__ = lib_path
+		cls.__instance__ = instance
+		cls.__PLUGINS__  = {}
+
+		setattr(cls, name, cls)   # Make class available for import via instance
+
+		for plugin_cls_name in plugins or []:
+			plugin_cls = Import.get_class(instance, plugin_cls_name, plugins_path)
+			if plugin_cls is not None:
+				cls.__PLUGINS__[plugin_cls_name] = plugin_cls(instance)
+
+		return cls
+
+
+class WL(metaclass=WLMeta, plugins=['Py']): # , 'Data', 'Text'
+	ModuleMeta   = ModuleMeta
+	Module       = Module
+	File         = File
+	Directory    = Directory
+	Plugin       = Plugin
+	Service      = Service
+	Import       = Import
+	Undefined    = Undefined
+	String       = String
+	Timer        = Timer
+
+	# Resolve attribute
 	# ----------------------------------------------------------------------
 	def __getattr__(self, name):
-		if name.startswith('__'):
-			raise AttributeError(name)
+		value = None
 
-		cls = type(self)
-		if hasattr(cls, name):
-			return getattr(cls, name)
-
-		return self._resolve(name, self.core_path)
-
-	# Resolve dotted path using WL lazy resolution
-	# ----------------------------------------------------------------------
-	def __getitem__(self, module_name):
-		obj = self
+		for instance in self.__instances__():
+			value = instance.__children__.get(name)
+			if value is not None:
+				break
 		
-		parts = module_name.split('.')
-		if parts[0] == self.lib_name:
-			parts.pop(0)
-
-		for part in parts:
-			obj = getattr(obj, part)
-
-		return obj
-
-	# Iterate items in the library core directory.
-	# ----------------------------------------------------------------------
-	def __iter__(self):
-		return iter(Directory(self, self.core_path))
-
-	# Repr
-	# ----------------------------------------------------------------------
-	def __repr__(self):
-		return f'<Whitelabel Library `{self.lib_name}` path="{self.lib_path}">'
-
-	# ======================================================================
-	# PRIVATE METHODS
-	# ======================================================================
-
-	# Modules are provided without ext, need to resolve
-	# ----------------------------------------------------------------------
-	def _resolve_basename_to_file(self, path):
-		dir_path  = os.path.dirname(path)
-		base_name = os.path.basename(path)
-
-		result = None
-
-		if os.path.isdir(dir_path):
-			for file_name in os.listdir(dir_path):
-				name, ext = os.path.splitext(file_name)
-
-				if name == base_name and ext:
-					result = os.path.join(dir_path, file_name)
+		if value is None:
+			for instance in self.__instances__():
+				value = instance.__resolve__(name, instance.__path__, self.__name__)
+				if value is not None:
+					instance.__children__[name] = value
 					break
 
-		return result
+		if value is None:
+			raise AttributeError(f'Library `{self.__name__}` has no attribute `{name}`')
 
-	# Resolve module or namespace by name.
+		return value.load()
+
+	# String representation
 	# ----------------------------------------------------------------------
-	def _resolve(self, name, path):
-		# print(f'[WL RESOLVE] name={name}, path={path}')
-		path_no_ext = os.path.join(path, String.camel_to_snake(name))
-		result      = None
+	def __repr__(self):
+		return f'<Library `{self.__name__}`>'
 
-		# Namespace
-		# - - - - - - - - - - - - - - - - - - - - - - - - - 
-		if os.path.isdir(path_no_ext):
-			if path_no_ext in self._ns_cache:
-				result = self._ns_cache[path_no_ext]
-			else:
-				result = Directory(self, path_no_ext)
-				setattr(result, '__lib__', self)
-				self._ns_cache[path_no_ext] = result
+	# Iterate lineage layers
+	# ----------------------------------------------------------------------
+	def __iter__(self):
+		return Directory(self, self.__path__, self.__name__).__iter__()
 
-		# File
-		# - - - - - - - - - - - - - - - - - - - - - - - - - 
+	# Iterate lineage layers
+	# ----------------------------------------------------------------------
+	def __instances__(self):
+		for cls in type(self).__mro__:
+			if cls != object:
+				yield cls.__instance__
+
+	# Main resolution router
+	# ----------------------------------------------------------------------
+	def __resolve__(self, name, parent_path, parent_route):
+		value = None
+		path  = os.path.realpath(os.path.join(parent_path, name))
+
+		if os.path.isdir(path):
+			return Directory(self, path, f'{parent_route}.{name}')
 		else:
-			resolved_path = self._resolve_basename_to_file(path_no_ext)
-			# print(f'[WL RESOLVE] resolved_path={resolved_path}')
-			if resolved_path is not None:
-				if resolved_path in self._file_cache:
-					result = self._file_cache[resolved_path]
-				else:
-					result = File(self, resolved_path).load()
-					self._file_cache[resolved_path] = result
-
-		return result
-
-	# Import additional library alongside the current
-	# ----------------------------------------------------------------------
-	def _imp(self, file_path):
-		lib_name = os.path.splitext(os.path.basename(file_path))[0]
-		module   = Common.load_module(lib_name, file_path)
-
-		for obj in module.__dict__.values():
-			if isinstance(obj, type) and issubclass(obj, WL):
-				return obj
-
-		raise RuntimeError(f'No WhiteLabel instance produced by `{file_path}`')
-
-	# Import many libs alongside the current
-	# ----------------------------------------------------------------------
-	def _imp_many(self, import_libs):
-		libs = {}
-
-		if isinstance(import_libs, list):
-			for import_lib in import_libs:
-				self._imp(import_lib)
+			for instance in self.__instances__():
+				for plugin_name, plugin in instance.__PLUGINS__.items():
+					value = plugin(name, parent_path, parent_route)
+					if value is not None: break
+				if value is not None: break
 		
-		for lib_inst in self.__class__._instances.values():
-			libs[lib_inst.lib_name] = lib_inst
-
-		return libs
-
-	# Late-bind object to lib
-	# ----------------------------------------------------------------------
-	def _attach(self, name, obj, instantiate=False):
-		Common.set_lib(obj, self)
-
-		if instantiate : setattr(self, name, obj(self, None))
-		else           : setattr(self, name, obj)
+		return value
 
 	# ======================================================================
 	# PUBLIC METHODS
 	# ======================================================================
 
-	# Initialize core paths and internal caches.
+	# Called when library is fully assembled and ready to work
 	# ----------------------------------------------------------------------
-	def initialize(self, lib_name, lib_path=None, on_initialize=None):
-		self.Module.__lib__ = self
-		self.lib_name       = lib_name
-		self.file_name      = Common.get_class_file(self.__class__)
-		self.lib_path       = os.path.dirname(os.path.abspath(self.file_name)) if lib_path is None else lib_path
-		self.core_path      = os.path.join(self.lib_path, 'core')
-		self.wl_core_path   = os.path.join(os.path.dirname(__file__), 'core')
-		self.module_attr    = f'__{self.lib_name}_module__'
+	def initialize(self):
+		raise NotImplementedError(f'Library `{self.__name__}` must implement initialize()')
 
-		sys.modules[self.lib_name] = self
-		self.__path__ = [self.lib_path]
-
-		self._class_cache = {}
-		self._file_cache  = {}
-		self._ns_cache    = {}
-		self._data_cache  = {}
-		self._pkg_cache   = {}
-		self._plugins     = {}
-		self._services    = {}  # This is where instances of singleton services live for each lib
-
-		self._attach( 'Events',        Events,       instantiate=True  )
-		self._attach( 'Conf',          Conf,         instantiate=True  )
-		self._attach( 'String',        String,       instantiate=True  )
-		self._attach( 'dual_method',   DualMethod,   instantiate=False )
-		self._attach( 'dual_property', DualProperty, instantiate=False )
-
-		# Common.set_lib(self, Conf)
-		# self.Conf = Conf(self)
-
-		if self.verbose:
-			print(f'\nInitialized library `{self.lib_name}`')
-			print('-' * 70)
-			print(f'– ' + f'Main `{self.lib_name}` directory'.ljust(27, ' ') + f' : `{self.lib_path}`')
-			print(f'– Import files expected under : `{self.core_path}`')
-			print(f'– All modules have property   : `self.{self.module_attr}`')
-			print()
-
-	# Adds plugin for custom path matching and matched file processing
+	# Create symlink
 	# ----------------------------------------------------------------------
-	def add_plugin(self, plugin_class):
-		name = plugin_class.__name__
-		if name in self._plugins:
-			raise ValueError(f'Plugin `{name}` already registered')
-		self._plugins[name] = plugin_class()
-
-	# Resolve filesystem path into a WL node under `core/`.
-	# ----------------------------------------------------------------------
-	@classmethod
-	def resolve(cls, path):
-		lib       = cls()
-		abs_path  = os.path.abspath(path)
-		core_path = os.path.abspath(lib.core_path)
-		result    = None
-
-		# Only real paths inside this library's `core/` tree resolve.
-		if os.path.commonpath([core_path, abs_path]) == core_path and os.path.exists(abs_path):
-			if os.path.isdir(abs_path):
-				result = Directory(lib, abs_path)
-			else:
-				result = File(lib, abs_path)
-
-		return result
-
-	# The main method you will use to create your library
-	# ----------------------------------------------------------------------
-	@classmethod
-	def define(cls, lib_name, lib_file, import_libs=None, on_initialize=None, **attrs):
-		attrs['__file__'] = lib_file
-		
-		bases    = (cls,)
-		lib_cls  = type(lib_name, bases, attrs)
-		lib_inst = lib_cls(
-			lib_path = os.path.dirname(lib_file),
-		)
-
-		all_libs = lib_inst._imp_many(import_libs)
-
-		# print({lib_inst.name: lib_inst for lib_inst in cls._instances.values()})
-		if callable(on_initialize):
-			on_initialize(**all_libs)
-		
-		return lib_inst
+	def link(self, name, path):
+		Directory(self, self.__path__, self.__name__).link(name, path)
