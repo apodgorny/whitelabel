@@ -1,5 +1,12 @@
 # WhiteLabel invariants 5
 
+## Python carrier law
+
+- Any `.py` file that is loaded through `py.py` is an own-module source file by law.
+- Such a file must define exactly one loadable class with the required `snake_to_camel` relationship between filename and class name.
+- That class must extend `wl.Module`.
+- If a `.py` file does not satisfy that contract, it is not a valid WL carrier and must not load through `WL` or `O`.
+
 ## Scope
 
 This file supplements and corrects `whitelabel_invariants1.md` through `whitelabel_invariants4.md`.
@@ -199,4 +206,3 @@ This keeps namespace law separate from storage law.
 - routes are derived during materialization
 - namespace names and storage filenames remain separate
 - discovery and realization are distinct phases
-

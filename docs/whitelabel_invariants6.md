@@ -1,5 +1,12 @@
 # Whitelabel Invariants 6
 
+## Python carrier law
+
+- Any `.py` file that is loaded through `py.py` is an own-module source file by law.
+- Such a file must define exactly one loadable class with the required `snake_to_camel` relationship between filename and class name.
+- That class must extend `wl.Module`.
+- If a `.py` file does not satisfy that contract, it is not a valid WL carrier and must not load through `WL` or `O`.
+
 ## Scope
 
 This file captures the architectural decisions from the current conversation about caching, freshness, plugins, and file objects.
@@ -151,4 +158,3 @@ No extra external cache layer is required for this distinction.
 - directory knows route
 
 This split is preferred over dunder global caches and preferred over plugin-owned result caches.
-

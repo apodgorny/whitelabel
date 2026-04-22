@@ -1,6 +1,6 @@
 import os, sys
 
-from lib.import_   import Import
+from lib.imports   import Imports
 from lib.module    import Module, ModuleMeta
 from lib.service   import Service
 from lib.string    import String
@@ -9,6 +9,7 @@ from lib.directory import Directory
 from lib.plugin    import Plugin
 from lib.undefined import Undefined
 from lib.timer     import Timer
+from lib.tester    import Tester
 
 
 
@@ -35,21 +36,27 @@ class WLMeta(type):
 		instance.__name__  = name.lower()
 		instance.__spec__  = None
 		instance.__children__ = {}
+
+		Imports.__lib__ = instance
+		Tester.lib      = instance
 		
 		# Publish library name for import
 		module.__dict__[instance.__name__] = instance
-		sys.modules[instance.__name__] = instance
+		sys.modules[instance.__name__]     = instance
 
 		cls.__path__     = path
 		cls.__lib_file__ = lib_file
 		cls.__lib_path__ = lib_path
 		cls.__instance__ = instance
 		cls.__PLUGINS__  = {}
+		cls.Tester       = Tester
+		cls.tester       = Tester
 
 		setattr(cls, name, cls)   # Make class available for import via instance
 
 		for plugin_cls_name in plugins or []:
-			plugin_cls = Import.get_class(instance, plugin_cls_name, plugins_path)
+			plugin_route = f'{instance.__name__}.plugins.{plugin_cls_name}'
+			plugin_cls   = Imports.get_class(instance, plugin_cls_name, plugins_path, plugin_route)
 			if plugin_cls is not None:
 				cls.__PLUGINS__[plugin_cls_name] = plugin_cls(instance)
 
@@ -63,7 +70,7 @@ class WL(metaclass=WLMeta, plugins=['Py']): # , 'Data', 'Text'
 	Directory    = Directory
 	Plugin       = Plugin
 	Service      = Service
-	Import       = Import
+	Imports      = Imports
 	Undefined    = Undefined
 	String       = String
 	Timer        = Timer
@@ -77,13 +84,11 @@ class WL(metaclass=WLMeta, plugins=['Py']): # , 'Data', 'Text'
 			value = instance.__children__.get(name)
 			if value is not None:
 				break
-		
-		if value is None:
-			for instance in self.__instances__():
-				value = instance.__resolve__(name, instance.__path__, self.__name__)
-				if value is not None:
-					instance.__children__[name] = value
-					break
+
+			value = instance.__resolve__(name, instance.__path__, self.__name__)
+			if value is not None:
+				instance.__children__[name] = value
+				break
 
 		if value is None:
 			raise AttributeError(f'Library `{self.__name__}` has no attribute `{name}`')
@@ -113,7 +118,9 @@ class WL(metaclass=WLMeta, plugins=['Py']): # , 'Data', 'Text'
 		value = None
 		path  = os.path.realpath(os.path.join(parent_path, name))
 
-		if os.path.isdir(path):
+		if parent_path == self.__path__ and name in ['test', 'test.py']:
+			value = None
+		elif os.path.isdir(path):
 			return Directory(self, path, f'{parent_route}.{name}')
 		else:
 			for instance in self.__instances__():

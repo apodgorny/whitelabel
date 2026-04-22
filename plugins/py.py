@@ -7,17 +7,18 @@ class Py(wl.Plugin):
 
 	EXTENSIONS = ['py']
 
+	# Resolve python class file
+	# ----------------------------------------------------------------------
 	def __resolve__(self, name, parent_path, parent_route):
 		path       = None
-		route      = None
 		class_name = None
+		route      = None
 
 		# bar.py /mypath/foo wl
 		# - - - - - - - - - - - - - - - - - - - - 
 		try_path = os.path.join(parent_path, name)
 		if os.path.isfile(try_path):
 			class_name = self.lib.String.snake_to_camel(os.path.splitext(name)[0])
-			route      = f'{parent_route}.{class_name}'
 			path       = try_path
 
 		# Bar /mypath/foo wl
@@ -28,17 +29,21 @@ class Py(wl.Plugin):
 				try_path = os.path.join(parent_path, f'{module_name}.{ext}')
 				if os.path.isfile(try_path):
 					class_name = name
-					route      = f'{parent_route}.{name}'
 					path       = try_path
 					break
 
-		return path, route, class_name
+		if class_name is not None:
+			route = f'{parent_route}.{class_name}'
 
+		return path, class_name, route
+
+	# Resolve python carrier
+	# ----------------------------------------------------------------------
 	def __call__(self, name, parent_path, parent_route):
 		file = None
 		lib  = self.lib
 
-		path, route, class_name = self.__resolve__(name, parent_path, parent_route)
+		path, class_name, route = self.__resolve__(name, parent_path, parent_route)
 
 		if path is not None:
 			
@@ -46,12 +51,9 @@ class Py(wl.Plugin):
 			# Load method
 			# - - - - - - - - - - - - - - - - - - - - 
 			def load_method():
-				cls = lib.Import.get_class(lib, class_name, path, dict(
-					__lib__   = lib,
-					__route__ = route
-				))
+				cls = lib.Imports.get_class(lib, class_name, path, route)
 				if not issubclass(cls, (lib.Module, lib.ModuleMeta)):
-					raise Exception(f'Class `{route}` does not extend from `Module`')
+					raise Exception(f'Class `{path}` does not extend from `Module`')
 				elif issubclass(cls, lib.Service):
 					cls = cls()
 				return cls

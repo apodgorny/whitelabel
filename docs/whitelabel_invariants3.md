@@ -1,5 +1,12 @@
 # WhiteLabel invariants 3
 
+## Python carrier law
+
+- Any `.py` file that is loaded through `py.py` is an own-module source file by law.
+- Such a file must define exactly one loadable class with the required `snake_to_camel` relationship between filename and class name.
+- That class must extend `wl.Module`.
+- If a `.py` file does not satisfy that contract, it is not a valid WL carrier and must not load through `WL` or `O`.
+
 ## Scope
 
 This file is a supplement to `whitelabel_invariants1.md` and `whitelabel_invariants2.md`.
